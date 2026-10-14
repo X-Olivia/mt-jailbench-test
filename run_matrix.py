@@ -108,11 +108,35 @@ def read_behavior_logs(run_dir, expected):
     return rows, len(valid), self_success, (sum(x["independent_judge_success"] for x in indep_judged) / len(indep_judged) if indep_judged else None)
 
 
+def _wait(r, timeout):
+    """Wait for one condition's process; timeout counts from that condition's own start."""
+    remaining = max(1, timeout - (time.monotonic() - r["start"]))
+    try:
+        code = r["proc"].wait(timeout=remaining)
+        r["status"] = "finished" if code == 0 else f"exit_{code}"
+    except subprocess.TimeoutExpired:
+        r["proc"].kill()
+        r["proc"].wait()
+        r["status"] = "timeout"
+    r["logfile"].close()
+    r["elapsed"] = round(time.monotonic() - r["start"], 1)
+
+
+def _merge(path, new_rows, names):
+    """Keep CSV rows from conditions not re-run in this invocation, replace the rest."""
+    old = []
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as f:
+            old = [row for row in csv.DictReader(f) if row.get("condition") not in names]
+    return old + new_rows
+
+
 def main():
     p = argparse.ArgumentParser(description="Run a model x attack-method MT-JailBench matrix")
     p.add_argument("--plan", default="experiments/matrix.yaml")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--only", nargs="*", help="Optional condition names to run")
+    p.add_argument("--parallel", action="store_true", help="Run all selected conditions at the same time")
     args = p.parse_args()
     repo = Path.cwd()
     if not (repo / "run_benchmark.py").exists():
@@ -131,7 +155,7 @@ def main():
     py = str(repo / ".venv/bin/python")
     if not Path(py).exists():
         sys.exit("Missing .venv/bin/python")
-    summary_rows, behavior_rows = [], []
+    summary_rows, behavior_rows, running = [], [], []
     for c in conditions:
         name = safe_name(c["name"])
         attacker = c["attacker"]
@@ -175,41 +199,52 @@ def main():
         if args.dry_run:
             print(f"DRY RUN {name}: {cmd}\n{config_path.read_text()}")
             continue
-        start = time.monotonic()
-        print(f"\n>>> Running {name}, timeout {timeout}s", flush=True)
         log_path = output_dir / f"{name}.console.log"
-        with log_path.open("w", encoding="utf-8") as logfile:
-            try:
-                result = subprocess.run(cmd, stdout=logfile, stderr=subprocess.STDOUT, timeout=timeout, check=False)
-                code = result.returncode
-                status = "finished" if code == 0 else f"exit_{code}"
-            except subprocess.TimeoutExpired:
-                status = "timeout"
-                code = 124
+        logfile = log_path.open("w", encoding="utf-8")
+        # Each condition is its own process (textgrad's backward engine is process-global).
+        proc = subprocess.Popen(cmd, stdout=logfile, stderr=subprocess.STDOUT)
+        print(f">>> Started {name} (pid {proc.pid}), log {log_path}", flush=True)
+        running.append({"c": c, "name": name, "attacker": attacker, "judge": judge, "proc": proc,
+                        "logfile": logfile, "log_path": log_path, "start": time.monotonic()})
+        if not args.parallel:
+            _wait(running[-1], timeout)
+    if args.dry_run:
+        print(f"\nReports: {report_dir}")
+        return
+
+    for r in running:
+        if "status" not in r:
+            _wait(r, timeout)
+
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    for r in running:
+        c, name, attacker, judge = r["c"], r["name"], r["attacker"], r["judge"]
         run_dir = output_dir / name
         behavior, completed, succeeded, indp_asr = read_behavior_logs(run_dir, expected)
         for b in behavior:
             behavior_rows.append({"condition": name, "method": c["method"], "attacker": attacker["model"], **b})
-        row = {
+        summary_rows.append({
             "condition": name, "method": c["method"], "attacker": attacker["model"],
             "target": base["target"]["model"], "judge": judge["model"],
             "planned": expected, "completed": completed, "errors_or_missing": max(0, expected - completed),
             "self_reported_successes": succeeded,
             "self_reported_asr": succeeded / completed if completed else None,
             "independent_judge_asr": indp_asr,
-            "status": status if completed == expected else status + "_partial",
-            "elapsed_seconds": round(time.monotonic() - start, 1),
-            "git_commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip(),
-            "console_log": str(log_path), "run_dir": str(run_dir),
+            "status": r["status"] if completed == expected else r["status"] + "_partial",
+            "elapsed_seconds": r["elapsed"],
+            "git_commit": commit,
+            "console_log": str(r["log_path"]), "run_dir": str(run_dir),
             "finished_utc": datetime.now(timezone.utc).isoformat(),
-        }
-        summary_rows.append(row)
-        fields = list(summary_rows[0].keys())
-        save_csv(report_dir / "matrix_summary.csv", summary_rows, fields)
-        if behavior_rows:
-            save_csv(report_dir / "matrix_behaviors.csv", behavior_rows, list(dict.fromkeys(k for r in behavior_rows for k in r)))
-        save_excel(report_dir / "matrix_results.xlsx", summary_rows, behavior_rows)
-        print(f"{name}: {completed}/{expected} logs, successes={succeeded}, status={row['status']}", flush=True)
+        })
+        print(f"{name}: {completed}/{expected} logs, successes={succeeded}, status={summary_rows[-1]['status']}", flush=True)
+
+    # Merge with rows from earlier invocations so separate runs don't overwrite each other's reports.
+    summary_rows = _merge(report_dir / "matrix_summary.csv", summary_rows, {r["name"] for r in running})
+    behavior_rows = _merge(report_dir / "matrix_behaviors.csv", behavior_rows, {r["name"] for r in running})
+    save_csv(report_dir / "matrix_summary.csv", summary_rows, list(dict.fromkeys(k for r in summary_rows for k in r)))
+    if behavior_rows:
+        save_csv(report_dir / "matrix_behaviors.csv", behavior_rows, list(dict.fromkeys(k for r in behavior_rows for k in r)))
+    save_excel(report_dir / "matrix_results.xlsx", summary_rows, behavior_rows)
     print(f"\nReports: {report_dir}")
 
 
