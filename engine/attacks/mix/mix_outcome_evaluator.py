@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from pathlib import Path
@@ -13,6 +12,7 @@ from ...core import AttackContext, TurnEvaluation
 from ...interfaces.attack.outcome_evaluator import OutcomeEvaluator
 from ...utils import parse_json
 from ..coa.similarity_scorer import SimilarityScorer
+from ..xteaming.xteaming_outcome_evaluator import judge_score_1_to_5
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +68,7 @@ class MixOutcomeEvaluator(OutcomeEvaluator):
         behavior = context.harmful_behavior
         response = context.get_current_attempt().response
         judge_prompt = self.XTEAMING_TEMPLATE.format(behavior=behavior, response=response)
-        response, _ = self.client.generate(judge_prompt, response_format={"type": "json_object"})
-        result = json.loads(response)
-        return result["score"], result["reason"]
+        return judge_score_1_to_5(self.client, judge_prompt)
 
     def _xteaming_judge(self, context: AttackContext):
         score, reason = self._run_score_judge(context)

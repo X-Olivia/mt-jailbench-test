@@ -1,15 +1,15 @@
 # Copy to mt-jailbench/experiments/matrix.yaml and edit model IDs.
-# Initial configuration uses only a SMALL 5-behavior sample.
+# Uses a SMALL 10-behavior sample.
 # All models below must be supported by client/supported_models.yaml.
 output_dir: outputs/matrix_runs
 report_dir: experiments/reports
-# Whole-condition timeout; includes strategy generation, retries, and all 5 behaviors.
-timeout_seconds: 1200
+# Whole-condition timeout; includes strategy generation, retries, and all behaviors.
+timeout_seconds: 7200
 shared:
-  num_behaviors: 5
-  concurrency_limit: 1
-  max_turns: 2
-  max_epochs: 1
+  num_behaviors: 10
+  concurrency_limit: 3
+  max_turns: 5
+  max_epochs: 10
   max_refines_per_turn: 2
   independent_judge: false
   judge:
@@ -19,13 +19,13 @@ shared:
     model: llama-4-scout
     provider: openrouter
 conditions:
-  - name: default_xteaming_v2
+  - name: default_xteaming_v3
     enabled: true
     method: xteaming
     attacker:
       model: llama-4-scout
       provider: openrouter
-  - name: default_crescendox_v2
+  - name: default_crescendox_v3
     enabled: true
     method: mix
     attacker:
