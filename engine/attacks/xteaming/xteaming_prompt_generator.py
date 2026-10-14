@@ -127,20 +127,28 @@ class XTeamingPromptGenerator(PromptGenerator):
                 return parsed
 
     @staticmethod
-    def _parse_strategy_json(response: str) -> dict:
+    def _parse_strategy_json(response: str | None) -> dict:
+        if response is None:
+            raise ValueError(
+                "Strategy model returned None, possibly due to provider refusal."
+            )
+
         cleaned = response.strip()
+
+        if not cleaned:
+            raise ValueError("Strategy model returned empty text.")
+
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
             if len(lines) >= 2:
                 cleaned = "\n".join(lines[1:-1]).strip()
+
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as exc:
             raise ValueError(
-                f"Failed to parse strategy JSON. Snippet: {cleaned[:500]}"
+                f"Failed to parse strategy JSON: {cleaned[:500]}"
             ) from exc
-
-    # ------------------------------------------------------------------ #
     # Attacker prompt templates
     # ------------------------------------------------------------------ #
     def _load_next_strategy(self) -> None:

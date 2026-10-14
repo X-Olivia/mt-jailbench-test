@@ -14,3 +14,16 @@ logs/
 
 # Ignore shell scripts under root folder
 /*.sh
+
+# Local environment
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+
+# Experiment logs
+logs/
+outputs/
+*.log
