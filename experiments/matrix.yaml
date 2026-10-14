@@ -1,0 +1,48 @@
+# Copy to mt-jailbench/experiments/matrix.yaml and edit model IDs.
+# Initial configuration uses only a SMALL 5-behavior sample.
+# All models below must be supported by client/supported_models.yaml.
+output_dir: outputs/matrix_runs
+report_dir: experiments/reports
+# Whole-condition timeout; includes strategy generation, retries, and all 5 behaviors.
+timeout_seconds: 1200
+shared:
+  num_behaviors: 5
+  concurrency_limit: 1
+  max_turns: 2
+  max_epochs: 1
+  max_refines_per_turn: 2
+  independent_judge: false
+  judge:
+    model: deepseek-v3.2
+    provider: openrouter
+  target:
+    model: llama-4-scout
+    provider: openrouter
+conditions:
+  - name: default_xteaming_v2
+    enabled: true
+    method: xteaming
+    attacker:
+      model: llama-4-scout
+      provider: openrouter
+  - name: default_crescendox_v2
+    enabled: true
+    method: mix
+    attacker:
+      model: llama-4-scout
+      provider: openrouter
+  # Enable after you deploy and verify a specific model on NERSC.
+  - name: obliterated_xteaming
+    enabled: false
+    method: xteaming
+    attacker:
+      model: REPLACE_WITH_HF_MODEL_ID
+      provider: local
+      base_url: http://REPLACE_WITH_COMPUTE_NODE:30000/v1
+  - name: obliterated_crescendox
+    enabled: false
+    method: mix
+    attacker:
+      model: REPLACE_WITH_HF_MODEL_ID
+      provider: local
+      base_url: http://REPLACE_WITH_COMPUTE_NODE:30000/v1
